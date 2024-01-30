@@ -52,16 +52,30 @@ class TlmTable():
             )
         )
 
+        for row in range(1,21):
+            entry = TlmRow()
+            entry.set(
+                "%d"%row,
+                "%d"%row,
+                "%d"%row,
+                "%d"%row,
+                "%d"%row,
+            )
+            self.table.contents.append(
+                (entry.getColumns(),('pack',None))
+                 )
+
     def getTable(self):
         return self.table
     
     def update(temp, newVals):
+        pass
 
 def show_or_exit(key):
     if key in ('q', 'Q'):
         raise urwid.ExitMainLoop()
-    else:
-        row.set("12","34","56","78","90")
+    # else:
+    #     row.set("12","34","56","78","90")
         
 
 
@@ -69,7 +83,14 @@ if __name__ == "__main__":
     # row = TlmRow()
     # frame = urwid.Frame(urwid.Filler(row.getColumns()))
     table = TlmTable()
-    frame = urwid.Frame(urwid.Filler(table.getTable()))
+    frame = urwid.Frame(
+        urwid.Scrollable(
+            urwid.Filler(
+                table.getTable(), 'top'
+            )
+        )
+    )
+
     loop = urwid.MainLoop(frame, unhandled_input=show_or_exit)
     loop.run()
 
