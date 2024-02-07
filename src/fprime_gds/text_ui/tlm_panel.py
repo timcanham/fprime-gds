@@ -84,9 +84,11 @@ if __name__ == "__main__":
     # frame = urwid.Frame(urwid.Filler(row.getColumns()))
     table = TlmTable()
     frame = urwid.Frame(
-        urwid.Scrollable(
-            urwid.Filler(
-                table.getTable(), 'top'
+        urwid.ScrollBar(
+            urwid.Scrollable(
+                urwid.Filler(
+                    table.getTable(), 'top'
+                )
             )
         )
     )
