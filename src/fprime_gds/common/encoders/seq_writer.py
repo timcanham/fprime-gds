@@ -11,6 +11,7 @@ from fprime_gds.common.models.serialize.numerical_types import U8Type, U32Type
 from fprime_gds.common.models.serialize.type_exceptions import TypeMismatchException
 
 from fprime_gds.common.utils.config_manager import ConfigManager
+from fprime_gds.common.data_types.directive_data import DirectiveData
 
 
 class SeqBinaryWriter:
@@ -122,14 +123,42 @@ class SeqBinaryWriter:
         # Construct the record:
         return header + length + command
 
-    def write(self, seq_cmds_list):
+    def __binaryDirectiveRecord(self, directive_obj):
         """
-        Write out each command record
+        Return the binary directive record the sequencer is expecting.
+        Directive records have descriptor=3 (SEQUENCE_DIRECTIVE), time=0, and a directive buffer.
         """
-        num_records = len(seq_cmds_list)
+        # Descriptor = 3 (SEQUENCE_DIRECTIVE)
+        descriptor = U8Type(3).serialize()
+
+        # Time = 0 (ignored for directives)
+        time = U32Type(0).serialize() + U32Type(0).serialize()
+
+        # Header
+        header = descriptor + time
+
+        # Directive buffer (directive ID + arguments)
+        directive_buffer = directive_obj.serialize_directive_buffer()
+
+        # Directive length
+        self.len_obj.val = len(directive_buffer)
+        length = self.len_obj.serialize()
+
+        # Construct the record
+        return header + length + directive_buffer
+
+    def write(self, seq_list):
+        """
+        Write out each command and directive record
+        """
+        num_records = len(seq_list)
         sequence = b""
-        for cmd in seq_cmds_list:
-            sequence += self.__binaryCmdRecord(cmd)
+        for item in seq_list:
+            if isinstance(item, DirectiveData):
+                sequence += self.__binaryDirectiveRecord(item)
+            else:
+                # Assume it's a CmdData
+                sequence += self.__binaryCmdRecord(item)
         size = len(sequence)
         tb_txt = "ANY" if self.__timebase == 0xFFFF else hex(self.__timebase)
 

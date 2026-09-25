@@ -43,6 +43,12 @@ class SeqTransformer(Transformer[Token, Any]):
         assert isinstance(token, Token)
         return token.value
 
+    def directive_name(self, items: List[Token]) -> str:
+        """Extract directive name."""
+        token = items[0]
+        assert isinstance(token, Token)
+        return token.value
+
     def value(self, items: List[Any]) -> Any:
         """Return the parsed argument value."""
         item = items[0]
@@ -102,7 +108,7 @@ class LarkSeqFileParser:
             self.parser = Lark(f.read(), start="input", parser="lalr")
         self.transformer = SeqTransformer()
 
-    def parse(self, filename: str, cont: bool = False) -> Generator[Tuple[int, Descriptor, int, int, str, List[Any]], None, None]:
+    def parse(self, filename: str, cont: bool = False) -> Generator[Tuple[int, Any, int, int, str, List[Any]], None, None]:
         """
         Generator that parses an input sequence file and returns a tuple
         for each valid line of the sequence file.
@@ -110,7 +116,9 @@ class LarkSeqFileParser:
         @param filename: A sequence file name (usually a .seq extension)
         @param cont: attempt to continue after a line fails to parse, hopefully revealing more errors
         @return A generator of tuples:
-            (lineNumber, descriptor, seconds, useconds, mnemonic, arguments)
+            (lineNumber, descriptor, seconds, useconds, mnemonic_or_directive, arguments)
+            For commands: descriptor is Descriptor.RELATIVE or Descriptor.ABSOLUTE
+            For directives: descriptor is "DIRECTIVE"
         """
         filename_abs = Path(filename).absolute()
 
@@ -136,7 +144,7 @@ class LarkSeqFileParser:
         messages: List[str] = []
 
         # Parse the flattened tree structure
-        # Pattern: time_tag, mnemonic, [argument, argument, ...], time_tag, mnemonic, ...
+        # Pattern: (time_tag, mnemonic, [argument, ...]) | (directive_name, [argument])
         i = 0
         children = tree.children
         assert isinstance(children, list)
@@ -146,7 +154,40 @@ class LarkSeqFileParser:
             line_number = 0
 
             try:
-                # Find time_tag
+                # Check if this is a directive statement
+                if hasattr(children[i], "data") and children[i].data == "directive_name":
+                    directive_name_node = children[i]
+                    assert isinstance(directive_name_node, Tree)
+                    i += 1
+
+                    # Transform directive name
+                    directive_result = self.transformer.transform(directive_name_node)
+                    assert isinstance(directive_result, str)
+                    directive_name = directive_result
+
+                    # Get line number
+                    first_token = self._get_first_token(directive_name_node)
+                    line_number = (
+                        first_token.line - 1 if hasattr(first_token, "line") else 0
+                    )
+
+                    # Collect directive arguments (string or number)
+                    parsed_args = []
+                    if (
+                        i < len(children)
+                        and hasattr(children[i], "data")
+                        and children[i].data in ("string", "number")
+                    ):
+                        arg_node = children[i]
+                        assert isinstance(arg_node, Tree)
+                        parsed_args.append(self.transformer.transform(arg_node))
+                        i += 1
+
+                    # Yield directive with descriptor="DIRECTIVE"
+                    yield line_number, "DIRECTIVE", 0, 0, directive_name, parsed_args
+                    continue
+
+                # Find time_tag (command statement)
                 if not (
                     hasattr(children[i], "data") and children[i].data == "time_tag"
                 ):
@@ -169,7 +210,7 @@ class LarkSeqFileParser:
                 assert isinstance(mnemonic_node, Tree)
                 i += 1
 
-                # Collect arguments until we hit another time_tag or end
+                # Collect arguments until we hit another time_tag, directive_name, or end
                 arguments: List[Tree[Token]] = []
                 while (
                     i < len(children)

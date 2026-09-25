@@ -22,6 +22,7 @@ from fprime_gds.common.models.serialize.time_type import TimeType
 
 from fprime_gds.common.data_types import exceptions as gseExceptions
 from fprime_gds.common.data_types.cmd_data import CmdData, CommandArgumentsException
+from fprime_gds.common.data_types.directive_data import DirectiveData
 from fprime_gds.common.encoders.seq_writer import SeqBinaryWriter
 from fprime_gds.common.loaders.cmd_json_loader import CmdJsonLoader
 from fprime_gds.common.parsers.lark_seq_parser import LarkSeqFileParser
@@ -69,7 +70,7 @@ def generateSequence(inputFile, outputFile, dictionary, timebase, cont=False):
         raise SeqGenException(msg)
 
     # Parse the input file:
-    command_list = []
+    sequence_list = []  # Can contain both CmdData and DirectiveData
     file_parser = LarkSeqFileParser()
 
     filename_abs = Path(inputFile).absolute()
@@ -77,28 +78,41 @@ def generateSequence(inputFile, outputFile, dictionary, timebase, cont=False):
 
     messages = []
     try:
-        for i, descriptor, seconds, useconds, mnemonic, args in parsed_seq:
+        for i, descriptor, seconds, useconds, mnemonic_or_directive, args in parsed_seq:
             try:
-                if mnemonic not in cmd_name_dict:
-                    msg = f"{filename_abs}:{i + 1}: '{mnemonic}' does not match any command in the command dictionary."
-                    raise SeqGenException(msg)
-                # Set the command arguments:
-                try:
-                    cmd_time = TimeType(
-                        TimeType.TimeBase("TB_DONT_CARE"),
-                        seconds=seconds,
-                        useconds=useconds,
-                    )
-                    cmd_data = CmdData(
-                        args,
-                        cmd_name_dict[mnemonic],
-                        cmd_desc=descriptor,
-                        cmd_time=cmd_time,
-                    )
-                except CommandArgumentsException as e:
-                    msg = f"{filename_abs}:{i + 1}: {mnemonic} errored: {','.join(e.errors)}"
-                    raise SeqGenException(msg) from e
-                command_list.append(cmd_data)
+                # Check if this is a directive
+                if descriptor == "DIRECTIVE":
+                    # This is a directive
+                    directive_name = mnemonic_or_directive
+                    try:
+                        directive_data = DirectiveData(directive_name, args)
+                        sequence_list.append(directive_data)
+                    except ValueError as e:
+                        msg = f"{filename_abs}:{i + 1}: {directive_name} errored: {str(e)}"
+                        raise SeqGenException(msg) from e
+                else:
+                    # This is a command
+                    mnemonic = mnemonic_or_directive
+                    if mnemonic not in cmd_name_dict:
+                        msg = f"{filename_abs}:{i + 1}: '{mnemonic}' does not match any command in the command dictionary."
+                        raise SeqGenException(msg)
+                    # Set the command arguments:
+                    try:
+                        cmd_time = TimeType(
+                            TimeType.TimeBase("TB_DONT_CARE"),
+                            seconds=seconds,
+                            useconds=useconds,
+                        )
+                        cmd_data = CmdData(
+                            args,
+                            cmd_name_dict[mnemonic],
+                            cmd_desc=descriptor,
+                            cmd_time=cmd_time,
+                        )
+                    except CommandArgumentsException as e:
+                        msg = f"{filename_abs}:{i + 1}: {mnemonic} errored: {','.join(e.errors)}"
+                        raise SeqGenException(msg) from e
+                    sequence_list.append(cmd_data)
             except SeqGenException as exc:
                 if not cont:
                     raise exc
@@ -107,6 +121,28 @@ def generateSequence(inputFile, outputFile, dictionary, timebase, cont=False):
         raise SeqGenException("\n".join([e.getMsg()] + messages))
     if cont and messages:
         raise SeqGenException("\n".join(messages))
+
+    # Validate labels: collect all defined labels and referenced labels
+    defined_labels = set()
+    referenced_labels = set()
+
+    for item in sequence_list:
+        if isinstance(item, DirectiveData):
+            if item.get_directive_name() == "LABEL":
+                label_name = item.get_args()[0]
+                if label_name in defined_labels:
+                    msg = f"{filename_abs}: Duplicate label '{label_name}' found"
+                    raise SeqGenException(msg)
+                defined_labels.add(label_name)
+            elif item.get_directive_name() in ("JCF", "JCS"):
+                label_name = item.get_args()[0]
+                referenced_labels.add(label_name)
+
+    # Check that all referenced labels are defined
+    undefined_labels = referenced_labels - defined_labels
+    if undefined_labels:
+        msg = f"{filename_abs}: Undefined labels referenced: {', '.join(sorted(undefined_labels))}"
+        raise SeqGenException(msg)
 
     # Write to the output file:
     writer = SeqBinaryWriter(timebase=timebase)
@@ -118,7 +154,7 @@ def generateSequence(inputFile, outputFile, dictionary, timebase, cont=False):
         msg = f"Encountered problem opening output file '{outputFile}': {exc}"
         raise SeqGenException(msg) from exc
 
-    writer.write(command_list)
+    writer.write(sequence_list)
     writer.close()
 
 
