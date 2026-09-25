@@ -5,10 +5,10 @@ _toplevel_stmt: _cmd_stmt | _directive_stmt
 _cmd_stmt: time_tag mnemonic (","? _value_list)?
 _value_list: value (","? value)*
 
-_directive_stmt: directive_name _directive_args?
+_directive_stmt: DIRECTIVE_NAME _directive_args?
 _directive_args: string | number
 
-directive_name: "LABEL" | "JCF" | "EXIT" | "JCS" | "ERROR_MODE"
+DIRECTIVE_NAME.3: "LABEL" | "JCF" | "EXIT" | "JCS" | "ERROR_MODE"
 
 time_tag: relative_time | absolute_time
 

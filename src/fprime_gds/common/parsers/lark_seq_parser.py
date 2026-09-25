@@ -154,22 +154,12 @@ class LarkSeqFileParser:
             line_number = 0
 
             try:
-                # Check if this is a directive statement
-                if hasattr(children[i], "data") and children[i].data == "directive_name":
-                    directive_name_node = children[i]
-                    assert isinstance(directive_name_node, Tree)
+                # Check if this is a directive statement (DIRECTIVE_NAME is a terminal token)
+                if isinstance(children[i], Token) and children[i].type == "DIRECTIVE_NAME":
+                    directive_token = children[i]
+                    directive_name = directive_token.value
+                    line_number = directive_token.line - 1 if hasattr(directive_token, "line") else 0
                     i += 1
-
-                    # Transform directive name
-                    directive_result = self.transformer.transform(directive_name_node)
-                    assert isinstance(directive_result, str)
-                    directive_name = directive_result
-
-                    # Get line number
-                    first_token = self._get_first_token(directive_name_node)
-                    line_number = (
-                        first_token.line - 1 if hasattr(first_token, "line") else 0
-                    )
 
                     # Collect directive arguments (string or number)
                     parsed_args = []
